@@ -27,12 +27,18 @@ import { Label } from "@/components/ui/label"
 
 declare global {
   interface Window {
-    Razorpay: any
+    PaystackPop: any
   }
 }
 
 interface PremiumPaymentGatewayProps {
   onPaymentSuccess: (paymentData: any) => void
+}
+
+interface PaymentResponse {
+  success: boolean
+  message?: string
+  data?: any
 }
 
 export default function PremiumPaymentGateway({ onPaymentSuccess }: PremiumPaymentGatewayProps) {
@@ -46,7 +52,7 @@ export default function PremiumPaymentGateway({ onPaymentSuccess }: PremiumPayme
   // Countdown timer
   useEffect(() => {
     const timer = setInterval(() => {
-      setTimeLeft((prev) => (prev > 0 ? prev - 1 : 0))
+      setTimeLeft((prev: number) => (prev > 0 ? prev - 1 : 0))
     }, 1000)
     return () => clearInterval(timer)
   }, [])
@@ -54,7 +60,7 @@ export default function PremiumPaymentGateway({ onPaymentSuccess }: PremiumPayme
   // Testimonial rotation
   useEffect(() => {
     const interval = setInterval(() => {
-      setCurrentTestimonial((prev) => (prev + 1) % testimonials.length)
+      setCurrentTestimonial((prev: number) => (prev + 1) % testimonials.length)
     }, 4000)
     return () => clearInterval(interval)
   }, [])
@@ -178,96 +184,154 @@ export default function PremiumPaymentGateway({ onPaymentSuccess }: PremiumPayme
     },
   ]
 
-  const loadRazorpayScript = () => {
-    return new Promise((resolve) => {
-      const script = document.createElement("script")
-      script.src = "https://checkout.razorpay.com/v1/checkout.js"
-      script.onload = () => resolve(true)
-      script.onerror = () => resolve(false)
-      document.body.appendChild(script)
-    })
-  }
+  // Load Paystack script
+  useEffect(() => {
+    const script = document.createElement('script')
+    script.src = 'https://js.paystack.co/v1/inline.js'
+    script.async = true
+    document.body.appendChild(script)
 
-  const handlePayment = async () => {
+    return () => {
+      document.body.removeChild(script)
+    }
+  }, [])
+
+  const verifyPayment = async (reference: string) => {
+    try {
+      const response = await fetch('/api/verify-payment', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ reference }),
+      });
+
+      const data = await response.json();
+      
+      if (data.success) {
+        // Store the session token in localStorage
+        const token = `paystack_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        localStorage.setItem('gptchart_session_token', token);
+        
+        // Call the success callback
+        onPaymentSuccess({
+          reference,
+          email,
+          name,
+          status: 'success',
+          token
+        });
+        
+        // Force a page refresh to update the auth state
+        window.location.href = '/';
+      } else {
+        setError('Payment verification failed. Please contact support.');
+      }
+    } catch (error) {
+      console.error('Error verifying payment:', error);
+      setError('An error occurred while verifying your payment. Please check your internet connection and try again.');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const verifyPayment = async (reference: string): Promise<void> => {
+    try {
+      const response = await fetch('/api/verify-payment', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ reference }),
+      });
+
+      const data: PaymentResponse = await response.json();
+      
+      if (data.success) {
+        // Store the session token in localStorage
+        const token = `paystack_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        localStorage.setItem('gptchart_session_token', token);
+        
+        // Call the success callback
+        onPaymentSuccess({
+          reference,
+          email,
+          name,
+          status: 'success',
+          token
+        });
+        
+        // Force a page refresh to update the auth state
+        window.location.href = '/';
+      } else {
+        setError(data.message || 'Payment verification failed. Please contact support.');
+      }
+    } catch (error) {
+      console.error('Error verifying payment:', error);
+      setError('An error occurred while verifying your payment. Please check your internet connection and try again.');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handlePayment = async (): Promise<void> => {
     if (!name || !email) {
-      setError("Please fill in all required fields")
-      return
+      setError("Please fill in all required fields");
+      return;
     }
 
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
-      setError("Please enter a valid email address")
-      return
+      setError("Please enter a valid email address");
+      return;
     }
 
-    setIsProcessing(true)
-    setError("")
+    if (!window.PaystackPop) {
+      setError("Payment system is still loading. Please try again in a moment.");
+      return;
+    }
+
+    setIsProcessing(true);
+    setError("");
 
     try {
-      const res = await loadRazorpayScript()
-      if (!res) {
-        throw new Error("Payment gateway failed to load")
-      }
+      // Create a payment reference
+      const paymentReference = `SIGNAL_${Date.now()}`;
 
-      const orderResponse = await fetch("/api/create-order", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
+      // Initialize Paystack payment
+      const handler = window.PaystackPop.setup({
+        key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY || 'pk_test_your_paystack_public_key',
+        email: email,
+        amount: 300000, // NGN 3,000 in kobo (smallest currency unit)
+        currency: 'NGN',
+        ref: paymentReference,
+        firstname: name.split(' ')[0],
+        lastname: name.split(' ').slice(1).join(' '),
+        metadata: {
+          custom_fields: [
+            {
+              display_name: "Product Name",
+              variable_name: "product_name",
+              value: "SignalAI Trading Platform"
+            }
+          ]
         },
-        body: JSON.stringify({
-          amount: 3000,
-          currency: "USD",
-        }),
-      })
+        callback: (response: any) => {
+          // Verify payment on your backend
+          verifyPayment(response.reference);
+        },
+        onClose: () => {
+          setIsProcessing(false);
+        }
+      });
 
-      if (!orderResponse.ok) {
-        throw new Error("Failed to create payment order")
-      }
-
-      const orderData = await orderResponse.json()
-
-      const options = {
-        key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || "rzp_test_9999999999",
-        amount: orderData.order.amount,
-        currency: orderData.order.currency,
-        name: "GPTChart Institutional™",
-        description: "Lifetime Access to Elite AI Trading Platform",
-        order_id: orderData.order.id,
-        handler: async (response: any) => {
-          try {
-            await onPaymentSuccess({
-              razorpay_order_id: response.razorpay_order_id,
-              razorpay_payment_id: response.razorpay_payment_id,
-              razorpay_signature: response.razorpay_signature,
-              user_email: email,
-              user_name: name,
-            })
-          } catch (error) {
-            console.error("Payment verification failed:", error)
-            setError("Payment verification failed. Please contact support.")
-          }
-        },
-        prefill: {
-          name: name,
-          email: email,
-        },
-        theme: {
-          color: "#3B82F6",
-        },
-        modal: {
-          ondismiss: () => {
-            setIsProcessing(false)
-          },
-        },
-      }
-
-      const paymentObject = new window.Razorpay(options)
-      paymentObject.open()
+      handler.openIframe();
     } catch (error) {
-      console.error("Payment error:", error)
-      setError("Payment failed. Please try again.")
-      setIsProcessing(false)
+      console.error("Payment error:", error);
+      setError("An error occurred while processing your payment. Please try again.");
+      setIsProcessing(false);
     }
+  }
   }
 
   return (
