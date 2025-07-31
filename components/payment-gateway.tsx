@@ -85,6 +85,8 @@ export default function PaymentGateway({ onPaymentSuccess }: PaymentGatewayProps
 
   const verifyPayment = async (reference: string) => {
     try {
+      console.log('Starting payment verification for reference:', reference);
+      
       // Call the backend API to verify the payment
       const response = await fetch('/api/verify-payment', {
         method: 'POST',
@@ -95,12 +97,20 @@ export default function PaymentGateway({ onPaymentSuccess }: PaymentGatewayProps
       });
 
       const data = await response.json();
+      console.log('Payment verification response:', data);
+      
+      if (!response.ok) {
+        console.error('Payment verification failed with status:', response.status);
+        throw new Error(data.error || 'Payment verification failed');
+      }
       
       if (data.success) {
+        console.log('Payment verification successful');
         // Store the session token in localStorage
         const token = `paystack_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         localStorage.setItem('gptchart_session_token', token);
         
+        console.log('Session token stored, calling onPaymentSuccess');
         // Call the success callback (which should trigger a page refresh)
         onPaymentSuccess();
         
@@ -110,11 +120,24 @@ export default function PaymentGateway({ onPaymentSuccess }: PaymentGatewayProps
         // Force a page refresh to update the auth state
         window.location.href = '/';
       } else {
-        alert('Payment verification failed. Please contact support.');
+        console.error('Payment verification failed:', data.error || 'Unknown error');
+        throw new Error(data.error || 'Payment verification failed');
       }
     } catch (error) {
-      console.error('Error verifying payment:', error);
-      alert('An error occurred while verifying your payment. Please check your internet connection and try again.');
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Error verifying payment:', errorMessage, error);
+      
+      // More specific error messages based on the error
+      if (errorMessage.includes('NetworkError') || errorMessage.includes('Failed to fetch')) {
+        alert('Network error: Please check your internet connection and try again.');
+      } else if (errorMessage.includes('amount')) {
+        alert('Payment verification failed: Amount mismatch. Please contact support.');
+      } else {
+        alert(`Payment verification failed: ${errorMessage}`);
+      }
+      
+      // Clear any invalid session data
+      localStorage.removeItem('gptchart_session_token');
     } finally {
       setIsProcessing(false);
     }
