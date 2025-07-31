@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { CreditCard, Shield, Globe, Zap, Check, Star } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label"
 
 declare global {
   interface Window {
-    Razorpay: any
+    PaystackPop: any
   }
 }
 
@@ -22,16 +22,20 @@ export default function PaymentGateway({ onPaymentSuccess }: PaymentGatewayProps
   const [isProcessing, setIsProcessing] = useState(false)
   const [email, setEmail] = useState("")
   const [name, setName] = useState("")
+  const [scriptLoaded, setScriptLoaded] = useState(false)
 
-  const loadRazorpayScript = () => {
-    return new Promise((resolve) => {
-      const script = document.createElement("script")
-      script.src = "https://checkout.razorpay.com/v1/checkout.js"
-      script.onload = () => resolve(true)
-      script.onerror = () => resolve(false)
-      document.body.appendChild(script)
-    })
-  }
+  // Load Paystack script
+  useEffect(() => {
+    const script = document.createElement('script')
+    script.src = 'https://js.paystack.co/v1/inline.js'
+    script.async = true
+    script.onload = () => setScriptLoaded(true)
+    document.body.appendChild(script)
+
+    return () => {
+      document.body.removeChild(script)
+    }
+  }, [])
 
   const handlePayment = async () => {
     if (!name || !email) {
@@ -39,55 +43,81 @@ export default function PaymentGateway({ onPaymentSuccess }: PaymentGatewayProps
       return
     }
 
-    setIsProcessing(true)
-
-    const res = await loadRazorpayScript()
-    if (!res) {
-      alert("Razorpay SDK failed to load. Please check your internet connection.")
-      setIsProcessing(false)
+    if (!scriptLoaded) {
+      alert("Payment system is still loading. Please try again in a moment.")
       return
     }
 
-    // Create order on backend (in production, this would be an API call)
-    const orderData = {
-      amount: 3000, // $30 in cents (Razorpay uses smallest currency unit)
-      currency: "USD",
-      receipt: `receipt_${Date.now()}`,
-    }
+    setIsProcessing(true)
 
-    const options = {
-      key: "rzp_test_9999999999", // Replace with your Razorpay Test Key ID
-      amount: orderData.amount,
-      currency: orderData.currency,
-      name: "GPTChart Institutional™",
-      description: "Lifetime Access to AI Trading Platform",
-      image: "/logo.png", // Your logo URL
-      handler: (response: any) => {
-        // Payment successful
-        console.log("Payment successful:", response)
+    // Create a payment reference
+    const paymentReference = `SIGNAL_${Date.now()}`
+
+    // Initialize Paystack payment
+    const handler = window.PaystackPop.setup({
+      key: 'pk_test_your_paystack_public_key', // Replace with your Paystack test public key
+      email: email,
+      amount: 300000, // NGN 3,000 in kobo (smallest currency unit)
+      currency: 'NGN',
+      ref: paymentReference,
+      firstname: name.split(' ')[0],
+      lastname: name.split(' ').slice(1).join(' '),
+      metadata: {
+        custom_fields: [
+          {
+            display_name: "Product Name",
+            variable_name: "product_name",
+            value: "SignalAI Trading Platform"
+          }
+        ]
+      },
+      callback: function(response: any) {
+        // Verify payment on your backend
+        verifyPayment(response.reference)
+      },
+      onClose: function() {
         setIsProcessing(false)
-        onPaymentSuccess()
-      },
-      prefill: {
-        name: name,
-        email: email,
-        contact: "", // Optional phone number
-      },
-      notes: {
-        address: "GPTChart Institutional HQ",
-      },
-      theme: {
-        color: "#3B82F6",
-      },
-      modal: {
-        ondismiss: () => {
-          setIsProcessing(false)
-        },
-      },
-    }
+      }
+    });
 
-    const paymentObject = new window.Razorpay(options)
-    paymentObject.open()
+    handler.openIframe();
+  }
+
+  const verifyPayment = async (reference: string) => {
+    try {
+      // Call the backend API to verify the payment
+      const response = await fetch('/api/verify-payment', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ reference }),
+      });
+
+      const data = await response.json();
+      
+      if (data.success) {
+        // Store the session token in localStorage
+        const token = `paystack_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        localStorage.setItem('gptchart_session_token', token);
+        
+        // Call the success callback (which should trigger a page refresh)
+        onPaymentSuccess();
+        
+        // Show success message
+        alert('Payment successful! You now have full access to the platform.');
+        
+        // Force a page refresh to update the auth state
+        window.location.href = '/';
+      } else {
+        alert('Payment verification failed. Please contact support.');
+      }
+    } catch (error) {
+      console.error('Error verifying payment:', error);
+      alert('An error occurred while verifying your payment. Please check your internet connection and try again.');
+    } finally {
+      setIsProcessing(false);
+    }
   }
 
   const features = [

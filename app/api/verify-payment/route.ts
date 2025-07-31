@@ -1,48 +1,81 @@
 import { type NextRequest, NextResponse } from "next/server"
-import crypto from "crypto"
+
+// Paystack test secret key - store this in an environment variable in production
+const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY || 'sk_test_your_paystack_secret_key';
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.text()
-    const signature = request.headers.get("x-razorpay-signature")
+    const { reference } = await request.json();
 
-    // Verify webhook signature (replace with your actual webhook secret)
-    const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET || "your_webhook_secret"
-
-    const expectedSignature = crypto.createHmac("sha256", webhookSecret).update(body).digest("hex")
-
-    if (signature !== expectedSignature) {
-      return NextResponse.json({ success: false, error: "Invalid signature" }, { status: 400 })
+    if (!reference) {
+      return NextResponse.json(
+        { success: false, error: 'Reference is required' },
+        { status: 400 }
+      );
     }
 
-    const event = JSON.parse(body)
+    // Verify payment with Paystack
+    const response = await fetch(
+      `https://api.paystack.co/transaction/verify/${reference}`,
+      {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${PAYSTACK_SECRET_KEY}`,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
 
-    // Handle different webhook events
-    switch (event.event) {
-      case "payment.captured":
-        // Payment successful - grant access to user
-        const paymentData = event.payload.payment.entity
+    const data = await response.json();
 
-        // In production, you would:
-        // 1. Update user record in database
-        // 2. Send confirmation email
-        // 3. Log the transaction
-
-        console.log("Payment captured:", paymentData)
-        break
-
-      case "payment.failed":
-        // Payment failed - handle accordingly
-        console.log("Payment failed:", event.payload.payment.entity)
-        break
-
-      default:
-        console.log("Unhandled webhook event:", event.event)
+    if (!data.status) {
+      return NextResponse.json(
+        { success: false, error: data.message || 'Payment verification failed' },
+        { status: 400 }
+      );
     }
 
-    return NextResponse.json({ success: true })
+    // Check if payment was successful
+    if (data.data.status === 'success') {
+      // Payment successful - grant access to user
+      const paymentData = data.data;
+      
+      // In production, you would:
+      // 1. Verify the amount matches what you expect
+      // 2. Update user record in database
+      // 3. Send confirmation email
+      // 4. Log the transaction
+      
+      console.log('Payment verified successfully:', paymentData);
+      
+      return NextResponse.json({
+        success: true,
+        data: {
+          status: paymentData.status,
+          amount: paymentData.amount / 100, // Convert from kobo
+          reference: paymentData.reference,
+          paidAt: paymentData.paid_at,
+          customer: paymentData.customer,
+        },
+      });
+    }
+
+    return NextResponse.json(
+      { 
+        success: false, 
+        error: 'Payment not successful',
+        status: data.data.status 
+      },
+      { status: 400 }
+    );
   } catch (error) {
-    console.error("Webhook error:", error)
-    return NextResponse.json({ success: false, error: "Webhook processing failed" }, { status: 500 })
+    console.error('Payment verification error:', error);
+    return NextResponse.json(
+      { 
+        success: false, 
+        error: 'An error occurred while verifying payment' 
+      },
+      { status: 500 }
+    );
   }
 }
