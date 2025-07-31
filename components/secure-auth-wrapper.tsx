@@ -17,27 +17,29 @@ export default function SecureAuthWrapper({ children }: SecureAuthWrapperProps) 
   const [securityViolation, setSecurityViolation] = useState(false)
   const [lastValidation, setLastValidation] = useState(0)
 
-  // Anti-tampering: Check for developer tools
+  // Anti-tampering: Check for developer tools (disabled in development)
   const detectDevTools = useCallback(() => {
-    const threshold = 160
-    const devtools = {
-      open: false,
-      orientation: null as string | null,
-    }
+    if (process.env.NODE_ENV === 'production') {
+      const threshold = 160
+      const devtools = {
+        open: false,
+        orientation: null as string | null,
+      }
 
-    const widthThreshold = window.outerWidth - window.innerWidth > threshold
-    const heightThreshold = window.outerHeight - window.innerHeight > threshold
+      const widthThreshold = window.outerWidth - window.innerWidth > threshold
+      const heightThreshold = window.outerHeight - window.innerHeight > threshold
 
-    if (widthThreshold || heightThreshold) {
-      devtools.open = true
-      devtools.orientation = widthThreshold ? "vertical" : "horizontal"
-    }
+      if (widthThreshold || heightThreshold) {
+        devtools.open = true
+        devtools.orientation = widthThreshold ? "vertical" : "horizontal"
+      }
 
-    if (devtools.open) {
-      setSecurityViolation(true)
-      localStorage.removeItem("gptchart_session_token")
-      console.clear()
-      console.warn("Security violation detected. Access revoked.")
+      if (devtools.open) {
+        setSecurityViolation(true)
+        localStorage.removeItem("gptchart_session_token")
+        console.clear()
+        console.warn("Security violation detected. Access revoked.")
+      }
     }
   }, [])
 
@@ -61,6 +63,11 @@ export default function SecureAuthWrapper({ children }: SecureAuthWrapperProps) 
 
   // Server-side session validation
   const validateSession = useCallback(async (token: string) => {
+    // In development, trust the local token
+    if (process.env.NODE_ENV !== 'production') {
+      return true;
+    }
+
     try {
       const response = await fetch("/api/validate-session", {
         method: "POST",
