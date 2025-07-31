@@ -55,7 +55,7 @@ export default function PaymentGateway({ onPaymentSuccess }: PaymentGatewayProps
 
     // Initialize Paystack payment
     const handler = window.PaystackPop.setup({
-      key: 'pk_test_your_paystack_public_key', // Replace with your Paystack test public key
+      key: 'pk_test_5896f728f66518a822c3a1be34bdf192f215cf81', // Replace with your Paystack test public key
       email: email,
       amount: 300000, // NGN 3,000 in kobo (smallest currency unit)
       currency: 'NGN',
