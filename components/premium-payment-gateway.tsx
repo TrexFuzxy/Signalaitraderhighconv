@@ -196,45 +196,6 @@ export default function PremiumPaymentGateway({ onPaymentSuccess }: PremiumPayme
     }
   }, [])
 
-  const verifyPayment = async (reference: string) => {
-    try {
-      const response = await fetch('/api/verify-payment', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ reference }),
-      });
-
-      const data = await response.json();
-      
-      if (data.success) {
-        // Store the session token in localStorage
-        const token = `paystack_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-        localStorage.setItem('gptchart_session_token', token);
-        
-        // Call the success callback
-        onPaymentSuccess({
-          reference,
-          email,
-          name,
-          status: 'success',
-          token
-        });
-        
-        // Force a page refresh to update the auth state
-        window.location.href = '/';
-      } else {
-        setError('Payment verification failed. Please contact support.');
-      }
-    } catch (error) {
-      console.error('Error verifying payment:', error);
-      setError('An error occurred while verifying your payment. Please check your internet connection and try again.');
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
   const verifyPayment = async (reference: string): Promise<void> => {
     try {
       const response = await fetch('/api/verify-payment', {
